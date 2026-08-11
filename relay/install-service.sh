@@ -603,8 +603,29 @@ if [ -n "$CLOUDFLARED_PATH" ]; then
                 TUNNEL_LIST=$("$CLOUDFLARED_PATH" tunnel list --output json 2>/dev/null || echo "[]")
                 TUNNEL_COUNT=$(echo "$TUNNEL_LIST" | python3 -c '
 import sys, json
-print(len(json.loads(sys.stdin.read())))
+try:
+    print(len(json.loads(sys.stdin.read())))
+except Exception:
+    print("0")
 ' 2>/dev/null || echo "0")
+
+                # JSON API can fail (EOF) while plain-text works; fall back to parsing names
+                if [ "$TUNNEL_COUNT" -le 0 ] 2>/dev/null || [ -z "$TUNNEL_COUNT" ]; then
+                    TUNNEL_LIST=$("$CLOUDFLARED_PATH" tunnel list 2>/dev/null | awk '
+                        /^[0-9a-f-]{36}[[:space:]]/ {print "{\"name\":\"" $2 "\",\"id\":\"" $1 "\",\"connections\":[]}"}
+                    ' | python3 -c '
+import sys, json
+items = [json.loads(l) for l in sys.stdin if l.strip()]
+print(json.dumps(items))
+' 2>/dev/null || echo "[]")
+                    TUNNEL_COUNT=$(echo "$TUNNEL_LIST" | python3 -c '
+import sys, json
+try:
+    print(len(json.loads(sys.stdin.read())))
+except Exception:
+    print("0")
+' 2>/dev/null || echo "0")
+                fi
 
                 if [ "$TUNNEL_COUNT" -gt 0 ]; then
                     echo ""
@@ -985,6 +1006,7 @@ if [ "$OS" = "macos" ]; then
     <dict>
         <key>PATH</key>
         <string>$SERVICE_PATH</string>
+
     </dict>
 </dict>
 </plist>
